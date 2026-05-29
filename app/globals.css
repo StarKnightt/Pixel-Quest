@@ -1,26 +1,90 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0a0a0a;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+html,
+body {
+  height: 100%;
+  background: #07060d;
+  color: #f5f3ff;
+  overscroll-behavior: none;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+.font-pixel {
+  font-family: var(--font-press), "Courier New", monospace;
+}
+
+.font-display {
+  font-family: var(--font-display), var(--font-press), system-ui, sans-serif;
+  letter-spacing: 0.02em;
+}
+
+/* glowing arcade title */
+.title-glow {
+  text-shadow:
+    0 2px 0 #2a1a40,
+    0 4px 0 #1a1030,
+    0 0 18px rgba(127, 227, 255, 0.55),
+    0 0 36px rgba(255, 160, 90, 0.35);
+}
+
+/* Crisp pixel scaling - never let the bilinear filter mush the art. */
+.pixelated {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* CRT post effect: scanlines + soft vignette + subtle flicker, drawn as an
+   overlay above the canvas. pointer-events:none so it never eats input. */
+.crt-scanlines {
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0.28) 3px,
+    rgba(0, 0, 0, 0.28) 4px
+  );
+  mix-blend-mode: multiply;
+}
+
+.crt-vignette {
+  background: radial-gradient(
+    ellipse at center,
+    rgba(0, 0, 0, 0) 55%,
+    rgba(0, 0, 0, 0.45) 100%
+  );
+  box-shadow: inset 0 0 80px rgba(0, 0, 0, 0.6);
+}
+
+.crt-flicker {
+  background: rgba(120, 150, 255, 0.04);
+  animation: crtFlicker 0.12s steps(2) infinite;
+}
+
+@keyframes crtFlicker {
+  0% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 0.25;
+  }
+  100% {
+    opacity: 0.55;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@keyframes floatY {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-6px);
+  }
+}
+
+.animate-float {
+  animation: floatY 2.4s ease-in-out infinite;
 }
