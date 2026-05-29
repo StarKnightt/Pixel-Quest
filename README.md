@@ -119,6 +119,19 @@ lib/game/
 
 ---
 
+## 📜 License & Attribution
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=for-the-badge)](LICENSE)
+
+Pixel Quest is released under the **[MIT License](LICENSE)** — © 2026 StarKnightt.
+
+You're welcome to use, modify and build on this code, **but you must keep the
+copyright notice and license intact** (i.e. give credit). If you ship something
+based on Pixel Quest, a shout-out and a link back to
+[this repo](https://github.com/StarKnightt/Pixel-Quest) is hugely appreciated. 🙏
+
+---
+
 <div align="center">
 
 ### ⭐ Enjoying Pixel Quest? Drop a star — it helps a ton! ⭐
