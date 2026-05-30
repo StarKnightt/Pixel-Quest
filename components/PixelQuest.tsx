@@ -40,6 +40,27 @@ export default function PixelQuest() {
   });
   const bestRef = useRef(best);
 
+  // Mobile orientation handling: gate portrait with a "rotate" prompt and let
+  // landscape go edge-to-edge fullscreen for a comfortable touch experience.
+  const [isTouch, setIsTouch] = useState(false);
+  const [isPortrait, setIsPortrait] = useState(false);
+  useEffect(() => {
+    const touchMq = window.matchMedia("(pointer: coarse)");
+    const portraitMq = window.matchMedia("(orientation: portrait)");
+    const update = () => {
+      setIsTouch(touchMq.matches);
+      setIsPortrait(portraitMq.matches);
+    };
+    update();
+    touchMq.addEventListener("change", update);
+    portraitMq.addEventListener("change", update);
+    return () => {
+      touchMq.removeEventListener("change", update);
+      portraitMq.removeEventListener("change", update);
+    };
+  }, []);
+  const mobileLandscape = isTouch && !isPortrait;
+
   useEffect(() => {
     const audio = new AudioEngine();
     audioRef.current = audio;
@@ -175,18 +196,36 @@ export default function PixelQuest() {
   const coins = hud.coins.toString().padStart(2, "0");
 
   return (
-    <div className="flex min-h-dvh w-full flex-col items-center justify-center overflow-hidden bg-linear-to-b from-[#1a1230] via-[#120c24] to-[#07060d] p-2 sm:p-6">
-      <h1 className="font-pixel title-glow mb-2 text-center text-sm leading-relaxed tracking-wide text-amber-300 sm:mb-3 sm:text-2xl">
-        PIXEL&nbsp;QUEST
-      </h1>
-      <GithubStars className="mb-3 sm:mb-5" />
+    <div
+      className={
+        mobileLandscape
+          ? "fixed inset-0 z-40 flex items-center justify-center overflow-hidden bg-black"
+          : "flex min-h-dvh w-full flex-col items-center justify-center overflow-hidden bg-linear-to-b from-[#1a1230] via-[#120c24] to-[#07060d] p-2 sm:p-6"
+      }
+    >
+      {!mobileLandscape && (
+        <>
+          <h1 className="font-pixel title-glow mb-2 text-center text-sm leading-relaxed tracking-wide text-amber-300 sm:mb-3 sm:text-2xl">
+            PIXEL&nbsp;QUEST
+          </h1>
+          <GithubStars className="mb-3 sm:mb-5" />
+        </>
+      )}
 
       <div
-        className="relative w-full max-w-5xl"
-        style={{ maxWidth: "min(64rem, calc((100dvh - 160px) * 1.7778))" }}
+        className={mobileLandscape ? "relative h-full w-full" : "relative w-full max-w-5xl"}
+        style={
+          mobileLandscape
+            ? undefined
+            : { maxWidth: "min(64rem, calc((100dvh - 160px) * 1.7778))" }
+        }
       >
         <div
-          className="relative aspect-video w-full overflow-hidden rounded-xl border-4 border-[#2a2348] bg-black shadow-[0_0_0_4px_#0d0a1a,0_18px_50px_rgba(0,0,0,0.7)]"
+          className={
+            mobileLandscape
+              ? "relative h-full w-full overflow-hidden bg-black"
+              : "relative aspect-video w-full overflow-hidden rounded-xl border-4 border-[#2a2348] bg-black shadow-[0_0_0_4px_#0d0a1a,0_18px_50px_rgba(0,0,0,0.7)]"
+          }
           style={{ touchAction: "none" }}
         >
           <canvas
@@ -288,17 +327,35 @@ export default function PixelQuest() {
               <PixelButton onClick={() => setPaused(false)}>▶ RESUME</PixelButton>
             </Overlay>
           )}
-        </div>
-
-        {/* Touch controls (mobile) */}
-        <div className="mt-4 flex items-center justify-between gap-4 md:hidden">
-          <div className="flex gap-3">
-            <TouchButton {...bindTouch("left")}>◀</TouchButton>
-            <TouchButton {...bindTouch("right")}>▶</TouchButton>
-          </div>
-          <TouchButton {...bindTouch("jump")}>JUMP</TouchButton>
+          {/* Touch controls — overlaid on the canvas for touch devices */}
+          {loaded && isTouch && hud.status === "playing" && !paused && (
+            <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-end justify-between p-3 sm:p-5">
+              <div className="pointer-events-auto flex gap-3">
+                <TouchButton {...bindTouch("left")}>◀</TouchButton>
+                <TouchButton {...bindTouch("right")}>▶</TouchButton>
+              </div>
+              <TouchButton className="pointer-events-auto" {...bindTouch("jump")}>
+                JUMP
+              </TouchButton>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Rotate-to-landscape gate (phones in portrait) */}
+      {isTouch && isPortrait && (
+        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-[#07060d] px-8 text-center">
+          <RotatePhoneIcon />
+          <h2 className="font-pixel title-glow text-base leading-relaxed text-amber-300">
+            ROTATE YOUR DEVICE
+          </h2>
+          <p className="font-pixel text-[10px] leading-5 text-violet-200/80">
+            Pixel Quest plays best in landscape.
+            <br />
+            Turn your phone sideways to play.
+          </p>
+        </div>
+      )}
 
       <p className="font-pixel mt-5 hidden text-center text-[10px] leading-5 text-violet-300/70 md:block">
         ← → / A D MOVE&nbsp;&nbsp;·&nbsp;&nbsp;SPACE / W / ↑ JUMP&nbsp;&nbsp;·&nbsp;&nbsp;P PAUSE
@@ -594,6 +651,7 @@ function PixelButton({
 
 function TouchButton({
   children,
+  className = "",
   ...handlers
 }: {
   children: React.ReactNode;
@@ -601,9 +659,31 @@ function TouchButton({
   return (
     <button
       {...handlers}
-      className="font-pixel flex h-16 min-w-16 select-none items-center justify-center rounded-xl border-2 border-[#4b3d7a] bg-[#2a2150]/90 px-5 text-sm text-amber-200 active:bg-[#39306a]"
+      className={`font-pixel flex h-14 min-w-14 select-none items-center justify-center rounded-xl border-2 border-[#4b3d7a] bg-[#2a2150]/70 px-5 text-sm text-amber-200 backdrop-blur-sm active:bg-[#39306a] sm:h-16 sm:min-w-16 ${className}`}
     >
       {children}
     </button>
+  );
+}
+
+function RotatePhoneIcon() {
+  return (
+    <svg
+      width="72"
+      height="72"
+      viewBox="0 0 24 24"
+      className="animate-rotate-hint text-amber-300"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <rect x="7" y="2" width="10" height="20" rx="2" />
+      <line x1="11" y1="18" x2="13" y2="18" />
+      <path d="M3 12a9 9 0 0 1 4-7.5" />
+      <polyline points="3 9 3 12 6 12" />
+    </svg>
   );
 }

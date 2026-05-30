@@ -88,3 +88,22 @@ body {
 .animate-float {
   animation: floatY 2.4s ease-in-out infinite;
 }
+
+/* Rotate-device hint: gently rock a phone from portrait to landscape. */
+@keyframes rotateHint {
+  0%,
+  20% {
+    transform: rotate(0deg);
+  }
+  50%,
+  70% {
+    transform: rotate(-90deg);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.animate-rotate-hint {
+  animation: rotateHint 2.4s ease-in-out infinite;
+}
