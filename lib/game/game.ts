@@ -294,7 +294,7 @@ export class Game {
       this.player.update(dt, input, this.level);
       this.updateParticles(dt);
       this.tickFx(dt);
-      this.camera.follow(this.player.rect, dt);
+      this.camera.follow(this.player.rect, dt, false);
       if (this.player.deathT <= 0) this.resolveDeath();
       this.emitHud();
       return;
@@ -395,7 +395,7 @@ export class Game {
 
     this.updateParticles(dt);
     this.tickFx(dt);
-    this.camera.follow(this.player.rect, dt);
+    this.camera.follow(this.player.rect, dt, this.player.onGround);
     this.emitHud();
   }
 
