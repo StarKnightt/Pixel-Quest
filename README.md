@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/logo.png" alt="Pixel Quest" width="240" />
+<img src="docs/og-banner.png" alt="Pixel Quest" width="100%" />
 
 # ⚔️ PIXEL QUEST ⚔️
 
