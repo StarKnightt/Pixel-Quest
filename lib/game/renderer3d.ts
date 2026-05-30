@@ -92,6 +92,13 @@ export class Renderer3D {
   private cloudMeshes: { mesh: THREE.Mesh; h: number }[] = [];
   private flag: THREE.Mesh | null = null;
 
+  // floating "+N" score popups: a reusable mesh pool + a cache of text textures
+  private scorePopupMeshes: THREE.Mesh[] = [];
+  private textTexCache = new Map<
+    string,
+    { tex: THREE.CanvasTexture; aspect: number }
+  >();
+
   private particles: THREE.Points;
   private particlePos: Float32Array;
 
@@ -538,6 +545,26 @@ export class Renderer3D {
     (this.particles.geometry.attributes.position as THREE.BufferAttribute).needsUpdate =
       true;
 
+    // --- floating "+N" score popups ------------------------------------
+    const pops = game.scorePopups;
+    for (const m of this.scorePopupMeshes) m.visible = false;
+    for (let i = 0; i < pops.length; i++) {
+      const p = pops[i];
+      const { tex, aspect } = this.getTextTex(p.text, p.color);
+      const mesh = this.getPopupMesh(i);
+      const mat = mesh.material as THREE.MeshBasicMaterial;
+      if (mat.map !== tex) {
+        mat.map = tex;
+        mat.needsUpdate = true;
+      }
+      const k = Math.max(0, Math.min(1, p.life / p.maxLife));
+      mat.opacity = k < 0.3 ? k / 0.3 : 1; // hold, then fade out near the end
+      const hH = 15;
+      const hW = hH * aspect;
+      mesh.visible = true;
+      this.billboard(mesh, p.x, -p.y, PICKUP_Z + 2, hW, hH, false, 0);
+    }
+
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -580,6 +607,62 @@ export class Renderer3D {
       map.set(e, mesh);
     }
     return mesh;
+  }
+
+  /** Cache a crisp outlined-text texture for a "+N" popup (keyed by text+color). */
+  private getTextTex(text: string, color: string) {
+    const key = `${text}|${color}`;
+    let entry = this.textTexCache.get(key);
+    if (!entry) {
+      const fontPx = 72;
+      const pad = 18;
+      const font = `900 ${fontPx}px "Arial Black", "Segoe UI", system-ui, sans-serif`;
+      const measure = document.createElement("canvas").getContext("2d")!;
+      measure.font = font;
+      const w = Math.ceil(measure.measureText(text).width) + pad * 2;
+      const h = fontPx + pad * 2;
+      const c = document.createElement("canvas");
+      c.width = w;
+      c.height = h;
+      const ctx = c.getContext("2d")!;
+      ctx.font = font;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineJoin = "round";
+      ctx.lineWidth = 10;
+      ctx.strokeStyle = "rgba(8,5,16,0.95)";
+      ctx.strokeText(text, w / 2, h / 2);
+      ctx.fillStyle = color;
+      ctx.fillText(text, w / 2, h / 2);
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      tex.magFilter = THREE.LinearFilter;
+      tex.minFilter = THREE.LinearFilter;
+      tex.generateMipmaps = false;
+      entry = { tex, aspect: w / h };
+      this.textTexCache.set(key, entry);
+    }
+    return entry;
+  }
+
+  private getPopupMesh(i: number): THREE.Mesh {
+    let m = this.scorePopupMeshes[i];
+    if (!m) {
+      m = new THREE.Mesh(
+        this.quad,
+        new THREE.MeshBasicMaterial({
+          transparent: true,
+          depthWrite: false,
+          depthTest: false,
+          side: THREE.DoubleSide,
+          toneMapped: false,
+        }),
+      );
+      m.renderOrder = 12;
+      this.scene.add(m);
+      this.scorePopupMeshes[i] = m;
+    }
+    return m;
   }
 
   private prunePickups(map: Map<object, THREE.Mesh>, list: object[]) {

@@ -65,6 +65,16 @@ interface CloudRect {
   h: number;
 }
 
+interface ScorePopup {
+  x: number;
+  y: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+  text: string;
+  color: string;
+}
+
 export class Game {
   level: Level;
   player: Player;
@@ -73,6 +83,7 @@ export class Game {
   gems: Gem[] = [];
   camera: Camera;
   particles: Particle[] = [];
+  scorePopups: ScorePopup[] = [];
   fireflies: Firefly[] = [];
   cloudRects: CloudRect[] = [];
   platforms: MovingPlatform[] = [];
@@ -192,6 +203,7 @@ export class Game {
     this.lives = START_LIVES;
     this.timeLeft = START_TIME;
     this.particles = [];
+    this.scorePopups = [];
     this.player = new Player(LEVEL_1.playerStart.col, LEVEL_1.playerStart.row);
     this.spawnEntities();
     for (const p of this.platforms) p.reset();
@@ -293,6 +305,7 @@ export class Game {
     if (this.player.dying) {
       this.player.update(dt, input, this.level);
       this.updateParticles(dt);
+      this.updateScorePopups(dt);
       this.tickFx(dt);
       this.camera.follow(this.player.rect, dt, false);
       if (this.player.deathT <= 0) this.resolveDeath();
@@ -347,7 +360,9 @@ export class Game {
             Math.random() *
               ((STOMP_SCORE_MAX - STOMP_SCORE_MIN) / STOMP_SCORE_STEP + 1),
           );
-        this.score += STOMP_SCORE_MIN + steps * STOMP_SCORE_STEP;
+        const gain = STOMP_SCORE_MIN + steps * STOMP_SCORE_STEP;
+        this.score += gain;
+        this.spawnScorePopup(gain, s.x + s.w / 2, s.y - 4, "#aef6ee");
         this.audio.stomp();
         this.shake(4, 0.2);
         this.burst(s.x + s.w / 2, s.y, PALETTE.gemLight, 16);
@@ -370,6 +385,7 @@ export class Game {
         c.collected = true;
         this.coinCount += 1;
         this.score += COIN_SCORE;
+        this.spawnScorePopup(COIN_SCORE, c.x + c.w / 2, c.y, PALETTE.coin);
         this.audio.coin();
         this.burst(c.x + c.w / 2, c.y + c.h / 2, PALETTE.coin, 8);
       }
@@ -382,6 +398,7 @@ export class Game {
       if (overlaps(this.player.rect, g.rect)) {
         g.collected = true;
         this.score += GEM_SCORE;
+        this.spawnScorePopup(GEM_SCORE, g.x + g.w / 2, g.y, PALETTE.gemLight);
         this.audio.gem();
         this.burst(g.x + g.w / 2, g.y + g.h / 2, PALETTE.gem, 14);
       }
@@ -394,6 +411,7 @@ export class Game {
     }
 
     this.updateParticles(dt);
+    this.updateScorePopups(dt);
     this.tickFx(dt);
     this.camera.follow(this.player.rect, dt, this.player.onGround);
     this.emitHud();
@@ -432,6 +450,28 @@ export class Game {
       p.life -= dt;
     }
     this.particles = this.particles.filter((p) => p.life > 0);
+  }
+
+  /** Spawn a floating "+N" score popup at a world position. */
+  private spawnScorePopup(amount: number, x: number, y: number, color: string) {
+    this.scorePopups.push({
+      x,
+      y,
+      vy: -52,
+      life: 0.95,
+      maxLife: 0.95,
+      text: `+${amount}`,
+      color,
+    });
+  }
+
+  private updateScorePopups(dt: number) {
+    for (const p of this.scorePopups) {
+      p.y += p.vy * dt;
+      p.vy += 40 * dt; // rise quickly then ease as it fades
+      p.life -= dt;
+    }
+    this.scorePopups = this.scorePopups.filter((p) => p.life > 0);
   }
 
   private tickFx(dt: number) {
