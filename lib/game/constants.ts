@@ -31,11 +31,19 @@ export const HURT_KNOCKBACK = 260;
 export const INVULN_TIME = 1.4;
 export const JUMP_CUT = 0.42; // velocity retained when jump released early
 
+// Super Star power-up: a timed "powered up" state (Mario-style). While active
+// the hero jumps noticeably higher, runs faster and bowls straight through
+// snails instead of taking damage.
+export const POWER_DURATION = 9; // seconds of super mode per star
+export const SUPER_JUMP_VELOCITY = -930; // ~6 tiles up (vs ~3.8 normally)
+export const SUPER_RUN_SPEED = 232;
+
 // Gameplay.
 export const START_LIVES = 3;
 export const START_TIME = 240;
 export const COIN_SCORE = 100;
 export const GEM_SCORE = 250;
+export const POWER_SCORE = 300;
 export const STOMP_SCORE = 200;
 // Stomping a snail awards a random bonus (in 50-point steps) for some variety.
 export const STOMP_SCORE_MIN = 100;
@@ -85,5 +93,97 @@ export const PALETTE = {
   gemDark: "#b53c16",
   heart: "#ff5d6c",
   heartDark: "#c43d52",
+  // super-star power-up (electric rainbow-ish glow)
+  power: "#ffe14d",
+  powerMid: "#ff7be5",
+  powerCore: "#9bf6ff",
+  powerEdge: "#7a3cff",
   shadow: "rgba(10,6,20,0.32)",
 } as const;
+
+// ---------------------------------------------------------------------------
+// Biome / atmosphere zones. As the camera scrolls across the level we blend
+// between these moods - fog + light colours are lerped in the 3D renderer and
+// a soft full-screen colour grade is crossfaded over the canvas - so the world
+// visibly shifts from twilight forest to dawn, golden dusk and moonlit night.
+export interface Biome {
+  name: string;
+  fog: [number, number, number]; // 0..1 linear-ish rgb
+  sun: [number, number, number];
+  ambient: [number, number, number];
+  hemiSky: [number, number, number];
+  hemiGround: [number, number, number];
+  grade: [number, number, number]; // 0..255 css overlay colour
+  gradeAlpha: number; // 0..1 overlay strength (soft-light blend)
+  snow: number; // 0..1 falling-snow intensity
+}
+
+export const BIOMES: Biome[] = [
+  {
+    name: "Twilight Forest",
+    fog: [0.141, 0.102, 0.227],
+    sun: [1.0, 0.94, 0.82],
+    ambient: [0.604, 0.651, 0.839],
+    hemiSky: [1.0, 0.851, 0.627],
+    hemiGround: [0.227, 0.169, 0.333],
+    grade: [120, 110, 180],
+    gradeAlpha: 0.0,
+    snow: 0,
+  },
+  {
+    name: "Misty Dawn",
+    fog: [0.32, 0.4, 0.52],
+    sun: [1.0, 0.96, 0.9],
+    ambient: [0.72, 0.8, 0.92],
+    hemiSky: [0.86, 0.93, 1.0],
+    hemiGround: [0.36, 0.4, 0.46],
+    grade: [150, 200, 235],
+    gradeAlpha: 0.22,
+    snow: 0,
+  },
+  {
+    name: "Frosted Peaks",
+    fog: [0.74, 0.82, 0.92],
+    sun: [0.95, 0.97, 1.0],
+    ambient: [0.82, 0.88, 0.98],
+    hemiSky: [0.92, 0.96, 1.0],
+    hemiGround: [0.62, 0.68, 0.8],
+    grade: [205, 228, 255],
+    gradeAlpha: 0.3,
+    snow: 1,
+  },
+  {
+    name: "Golden Dusk",
+    fog: [0.46, 0.22, 0.14],
+    sun: [1.0, 0.78, 0.5],
+    ambient: [0.82, 0.62, 0.5],
+    hemiSky: [1.0, 0.72, 0.42],
+    hemiGround: [0.32, 0.16, 0.12],
+    grade: [255, 138, 40],
+    gradeAlpha: 0.26,
+    snow: 0,
+  },
+  {
+    name: "Moonlit Night",
+    fog: [0.07, 0.08, 0.18],
+    sun: [0.62, 0.72, 1.0],
+    ambient: [0.42, 0.5, 0.78],
+    hemiSky: [0.4, 0.52, 0.9],
+    hemiGround: [0.1, 0.12, 0.24],
+    grade: [70, 70, 150],
+    gradeAlpha: 0.34,
+    snow: 0,
+  },
+];
+
+/** Interpolated scenery values for the current camera position. */
+export interface Scenery {
+  fog: [number, number, number];
+  sun: [number, number, number];
+  ambient: [number, number, number];
+  hemiSky: [number, number, number];
+  hemiGround: [number, number, number];
+  grade: [number, number, number];
+  gradeAlpha: number;
+  snow: number; // 0..1 falling-snow intensity
+}

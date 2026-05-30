@@ -97,6 +97,15 @@ export class AudioEngine {
     window.setTimeout(() => this.blip(1319, 0.16, "square", 0.26), 100);
   }
 
+  power() {
+    // bright ascending arpeggio + a sparkly high tail = "power up!"
+    const notes = [523, 659, 784, 1047, 1319];
+    notes.forEach((f, i) =>
+      window.setTimeout(() => this.blip(f, 0.1, "square", 0.3), i * 55),
+    );
+    window.setTimeout(() => this.blip(1568, 0.22, "square", 0.26, 2093), 300);
+  }
+
   win() {
     const notes = [523, 659, 784, 1047];
     notes.forEach((f, i) =>

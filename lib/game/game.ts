@@ -11,16 +11,21 @@ import {
   START_TIME,
   COIN_SCORE,
   GEM_SCORE,
+  POWER_SCORE,
+  POWER_DURATION,
   STOMP_SCORE_MIN,
   STOMP_SCORE_MAX,
   STOMP_SCORE_STEP,
   GOAL_SCORE,
   PALETTE,
+  BIOMES,
 } from "./constants";
+import type { Scenery } from "./constants";
 import type {
   Assets,
   GameStatus,
   HudSnapshot,
+  LoseReason,
   InputState,
   Rect,
   Sprite,
@@ -34,7 +39,15 @@ import {
   SOLID_CLOUD,
   SOLID_CRATE,
 } from "./level";
-import { Player, Snail, Coin, Gem, MovingPlatform, overlaps } from "./entities";
+import {
+  Player,
+  Snail,
+  Coin,
+  Gem,
+  PowerUp,
+  MovingPlatform,
+  overlaps,
+} from "./entities";
 import { Camera } from "./camera";
 import type { AudioEngine } from "./audio";
 
@@ -81,6 +94,7 @@ export class Game {
   snails: Snail[] = [];
   coins: Coin[] = [];
   gems: Gem[] = [];
+  powerups: PowerUp[] = [];
   camera: Camera;
   particles: Particle[] = [];
   scorePopups: ScorePopup[] = [];
@@ -89,6 +103,7 @@ export class Game {
   platforms: MovingPlatform[] = [];
 
   status: GameStatus = "ready";
+  loseReason: LoseReason = null;
   score = 0;
   coinCount = 0;
   lives = START_LIVES;
@@ -149,6 +164,16 @@ export class Game {
     this.snails = LEVEL_1.snails.map((s) => new Snail(s.col, s.row));
     this.coins = LEVEL_1.coins.map(([c, r]) => new Coin(c, r));
     this.gems = LEVEL_1.gems.map(([c, r]) => new Gem(c, r));
+    // pick a random subset of the candidate spots so power-ups vary each run
+    const spots = [...LEVEL_1.powerups];
+    for (let i = spots.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [spots[i], spots[j]] = [spots[j], spots[i]];
+    }
+    const count = Math.min(LEVEL_1.powerupCount ?? 3, spots.length);
+    this.powerups = spots
+      .slice(0, count)
+      .map(([c, r]) => new PowerUp(c, r));
   }
 
   private scatterFireflies() {
@@ -181,8 +206,10 @@ export class Game {
       time: Math.max(0, Math.ceil(this.timeLeft)),
       lives: this.lives,
       status: this.status,
+      loseReason: this.loseReason,
+      power: Math.ceil(this.player.powerT * 10) / 10,
     };
-    const key = `${snap.score}|${snap.coins}|${snap.time}|${snap.lives}|${snap.status}`;
+    const key = `${snap.score}|${snap.coins}|${snap.time}|${snap.lives}|${snap.status}|${snap.loseReason}|${snap.power}`;
     if (key !== this.lastHud) {
       this.lastHud = key;
       for (const fn of this.hudListeners) fn(snap);
@@ -200,6 +227,7 @@ export class Game {
   restart() {
     this.score = 0;
     this.coinCount = 0;
+    this.loseReason = null;
     this.lives = START_LIVES;
     this.timeLeft = START_TIME;
     this.particles = [];
@@ -214,11 +242,18 @@ export class Game {
     this.emitHud();
   }
 
-  /** Toggle invincibility / infinite time (cheat, for recording footage). */
+  /** Toggle invincibility / infinite time (cheat, for recording footage).
+   *  God mode also grants permanent Super Star mode (high jump + speed). */
   setGodMode(on: boolean) {
     this.godMode = on;
-    if (on) this.player.invuln = Math.max(this.player.invuln, 9999);
-    else this.player.invuln = 0;
+    if (on) {
+      this.player.invuln = Math.max(this.player.invuln, 9999);
+      this.player.powerT = 1e6; // effectively permanent super mode
+    } else {
+      this.player.invuln = 0;
+      this.player.powerT = 0;
+    }
+    this.emitHud();
   }
 
   /** Cheat: instantly win the current run (nice for ending a recording). */
@@ -233,6 +268,35 @@ export class Game {
     return {
       x: (Math.random() * 2 - 1) * m,
       y: (Math.random() * 2 - 1) * m,
+    };
+  }
+
+  /** Blended biome scenery for the current camera position (0..1 travel). */
+  getScenery(): Scenery {
+    const span = Math.max(1, this.level.pixelWidth - VIEW_W);
+    const travel = Math.max(0, Math.min(1, this.camera.x / span));
+    const pos = travel * (BIOMES.length - 1);
+    const i = Math.min(BIOMES.length - 2, Math.floor(pos));
+    const f = Math.max(0, Math.min(1, pos - i));
+    const a = BIOMES[i];
+    const b = BIOMES[i + 1];
+    const mix3 = (
+      u: [number, number, number],
+      v: [number, number, number],
+    ): [number, number, number] => [
+      u[0] + (v[0] - u[0]) * f,
+      u[1] + (v[1] - u[1]) * f,
+      u[2] + (v[2] - u[2]) * f,
+    ];
+    return {
+      fog: mix3(a.fog, b.fog),
+      sun: mix3(a.sun, b.sun),
+      ambient: mix3(a.ambient, b.ambient),
+      hemiSky: mix3(a.hemiSky, b.hemiSky),
+      hemiGround: mix3(a.hemiGround, b.hemiGround),
+      grade: mix3(a.grade, b.grade),
+      gradeAlpha: a.gradeAlpha + (b.gradeAlpha - a.gradeAlpha) * f,
+      snow: a.snow + (b.snow - a.snow) * f,
     };
   }
 
@@ -296,6 +360,27 @@ export class Game {
     }
   }
 
+  private powerTimer = 0;
+
+  /** Continuous sparkle trail emitted from the hero while in Super mode. */
+  private emitPowerSparkles(dt: number) {
+    const p = this.player;
+    this.powerTimer -= dt;
+    if (this.powerTimer > 0) return;
+    this.powerTimer = 0.035;
+    const palette = [PALETTE.powerCore, PALETTE.powerMid, PALETTE.power];
+    this.particles.push({
+      x: p.x + p.w / 2 + (Math.random() * 2 - 1) * 9,
+      y: p.y + p.h / 2 + (Math.random() * 2 - 1) * 12,
+      vx: (Math.random() * 2 - 1) * 28,
+      vy: -20 - Math.random() * 30,
+      life: 0.35 + Math.random() * 0.3,
+      maxLife: 0.65,
+      color: palette[Math.floor(Math.random() * palette.length)],
+      size: 1 + Math.floor(Math.random() * 2),
+    });
+  }
+
   update(dt: number, input: InputState) {
     if (this.status !== "playing") return;
 
@@ -317,7 +402,7 @@ export class Game {
       this.timeLeft -= dt;
       if (this.timeLeft <= 0) {
         this.timeLeft = 0;
-        this.lose();
+        this.lose("time");
         return;
       }
     }
@@ -404,6 +489,27 @@ export class Game {
       }
     }
     this.gems = this.gems.filter((g) => !g.collected);
+
+    // super-star power-ups
+    for (const pu of this.powerups) {
+      if (pu.collected) continue;
+      pu.update(dt);
+      if (overlaps(this.player.rect, pu.rect)) {
+        pu.collected = true;
+        this.player.empower(POWER_DURATION);
+        this.score += POWER_SCORE;
+        this.spawnScorePopup(POWER_SCORE, pu.x + pu.w / 2, pu.y, PALETTE.power);
+        this.audio.power();
+        this.flash("rgba(255,225,77,0.42)", 0.35);
+        this.shake(5, 0.3);
+        this.burst(pu.x + pu.w / 2, pu.y + pu.h / 2, PALETTE.powerCore, 22);
+        this.burst(pu.x + pu.w / 2, pu.y + pu.h / 2, PALETTE.powerMid, 14);
+      }
+    }
+    this.powerups = this.powerups.filter((pu) => !pu.collected);
+
+    // trail of sparkles while super
+    if (this.player.powered) this.emitPowerSparkles(dt);
 
     // goal
     if (overlaps(this.player.rect, this.goalRect)) {
@@ -502,9 +608,10 @@ export class Game {
     this.emitHud();
   }
 
-  private lose() {
+  private lose(reason: LoseReason = "lives") {
     if (this.status !== "playing") return;
     this.status = "lost";
+    this.loseReason = reason;
     this.audio.stopMusic();
     this.audio.lose();
     this.emitHud();

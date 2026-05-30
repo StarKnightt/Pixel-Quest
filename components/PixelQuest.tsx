@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { VIEW_W, VIEW_H } from "@/lib/game/constants";
+import { VIEW_W, VIEW_H, POWER_DURATION } from "@/lib/game/constants";
 import type { HudSnapshot } from "@/lib/game/types";
 import { Game } from "@/lib/game/game";
 import { Renderer3D } from "@/lib/game/renderer3d";
@@ -10,18 +10,26 @@ import { InputManager } from "@/lib/game/input";
 import { loadAll } from "@/lib/game/assets";
 import { useGameLoop } from "@/hooks/useGameLoop";
 
+interface BeforeInstallPromptEvent extends Event {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
+}
+
 const INITIAL_HUD: HudSnapshot = {
   score: 0,
   coins: 0,
   time: 240,
   lives: 3,
   status: "ready",
+  loseReason: null,
+  power: 0,
 };
 
 export default function PixelQuest() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<Renderer3D | null>(null);
   const flashRef = useRef<HTMLDivElement | null>(null);
+  const gradeRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<Game | null>(null);
   const audioRef = useRef<AudioEngine | null>(null);
   const inputRef = useRef<InputManager | null>(null);
@@ -60,6 +68,42 @@ export default function PixelQuest() {
     };
   }, []);
   const mobileLandscape = isTouch && !isPortrait;
+
+  // PWA: register the service worker + capture the install prompt so we can
+  // surface our own "Install" button (opens the web app as a standalone app).
+  const [installEvt, setInstallEvt] = useState<BeforeInstallPromptEvent | null>(
+    null,
+  );
+  useEffect(() => {
+    if ("serviceWorker" in navigator) {
+      const reg = () =>
+        navigator.serviceWorker.register("/sw.js").catch(() => {});
+      if (document.readyState === "complete") reg();
+      else window.addEventListener("load", reg, { once: true });
+    }
+    const onPrompt = (e: Event) => {
+      e.preventDefault();
+      setInstallEvt(e as BeforeInstallPromptEvent);
+    };
+    const onInstalled = () => setInstallEvt(null);
+    window.addEventListener("beforeinstallprompt", onPrompt);
+    window.addEventListener("appinstalled", onInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onPrompt);
+      window.removeEventListener("appinstalled", onInstalled);
+    };
+  }, []);
+
+  const promptInstall = useCallback(async () => {
+    const evt = installEvt;
+    if (!evt) return;
+    await evt.prompt();
+    try {
+      await evt.userChoice;
+    } finally {
+      setInstallEvt(null);
+    }
+  }, [installEvt]);
 
   useEffect(() => {
     const audio = new AudioEngine();
@@ -147,6 +191,13 @@ export default function PixelQuest() {
           f.style.opacity = String(fl.alpha);
           f.style.backgroundColor = fl.color;
         }
+        const grade = gradeRef.current;
+        if (grade) {
+          const sc = g.getScenery();
+          const [gr, gg, gb] = sc.grade;
+          grade.style.backgroundColor = `rgb(${Math.round(gr)},${Math.round(gg)},${Math.round(gb)})`;
+          grade.style.opacity = String(sc.gradeAlpha);
+        }
       },
     },
     loaded,
@@ -208,7 +259,10 @@ export default function PixelQuest() {
           <h1 className="font-pixel title-glow mb-2 text-center text-sm leading-relaxed tracking-wide text-amber-300 sm:mb-3 sm:text-2xl">
             PIXEL&nbsp;QUEST
           </h1>
-          <GithubStars className="mb-3 sm:mb-5" />
+          <div className="mb-3 flex items-center gap-2 sm:mb-5 sm:gap-3">
+            <GithubStars />
+            {installEvt && <InstallButton onClick={promptInstall} />}
+          </div>
         </>
       )}
 
@@ -235,6 +289,13 @@ export default function PixelQuest() {
             className="absolute inset-0 block h-full w-full"
           />
 
+          {/* biome colour grade (crossfades by camera position) */}
+          <div
+            ref={gradeRef}
+            className="pointer-events-none absolute inset-0 z-5 opacity-0 transition-opacity duration-300"
+            style={{ mixBlendMode: "soft-light" }}
+          />
+
           {/* hit flash (driven imperatively from the game loop) */}
           <div
             ref={flashRef}
@@ -253,6 +314,7 @@ export default function PixelQuest() {
               coins={coins}
               time={hud.time}
               lives={hud.lives}
+              power={hud.power}
               muted={muted}
               paused={paused}
               onToggleMute={toggleMute}
@@ -296,6 +358,7 @@ export default function PixelQuest() {
                 </p>
               )}
               <PixelButton onClick={start}>▶ START</PixelButton>
+              {installEvt && <InstallButton onClick={promptInstall} />}
             </Overlay>
           )}
 
@@ -312,8 +375,13 @@ export default function PixelQuest() {
           {loaded && hud.status === "lost" && (
             <Overlay>
               <OverlayTitle className="text-rose-400 title-glow">
-                GAME OVER
+                {hud.loseReason === "time" ? "TIME UP!" : "GAME OVER"}
               </OverlayTitle>
+              {hud.loseReason === "time" && (
+                <p className="font-pixel text-[10px] tracking-widest text-amber-200/90 sm:text-xs">
+                  THE CLOCK RAN OUT
+                </p>
+              )}
               <ResultStats score={score} best={best} record={hud.score >= best} />
               <PixelButton onClick={restart}>↻ TRY AGAIN</PixelButton>
             </Overlay>
@@ -369,6 +437,7 @@ function Hud({
   coins,
   time,
   lives,
+  power,
   muted,
   paused,
   onToggleMute,
@@ -378,6 +447,7 @@ function Hud({
   coins: string;
   time: number;
   lives: number;
+  power: number;
   muted: boolean;
   paused: boolean;
   onToggleMute: () => void;
@@ -396,6 +466,7 @@ function Hud({
           <span className="text-amber-200">TIME</span>{" "}
           <span className={time <= 30 ? "text-rose-400" : ""}>{time}</span>
         </span>
+        {power > 0 && <SuperMeter power={power} />}
       </div>
 
       <div className="flex items-center gap-2 sm:gap-3">
@@ -462,6 +533,27 @@ function GithubStars({ className = "" }: { className?: string }) {
   );
 }
 
+function InstallButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="font-pixel pointer-events-auto inline-flex items-center gap-2 rounded-lg border-2 border-amber-400/70 bg-amber-400/90 px-3 py-1.5 text-[8px] text-[#3a2400] shadow-[0_2px_0_#6b4a12] transition hover:-translate-y-0.5 hover:bg-amber-300 sm:text-[10px]"
+      aria-label="Install Pixel Quest as an app"
+    >
+      <DownloadIcon />
+      <span>INSTALL APP</span>
+    </button>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" className="inline-block fill-current" aria-hidden="true">
+      <path d="M7 1h2v6h3l-4 5-4-5h3V1zM2 13h12v2H2v-2z" />
+    </svg>
+  );
+}
+
 function GitHubIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 16 16" className="inline-block fill-current" aria-hidden="true">
@@ -485,6 +577,31 @@ function CoinIcon() {
       <circle cx="5.5" cy="5.5" r="3.4" fill="#ffd23f" />
       <rect x="4.6" y="3" width="1.8" height="5" fill="#e0a21c" />
     </svg>
+  );
+}
+
+function SuperMeter({ power }: { power: number }) {
+  const pct = Math.max(0, Math.min(1, power / POWER_DURATION));
+  const low = power <= 2.5;
+  return (
+    <span className="flex items-center gap-1.5">
+      <span
+        className={`inline-flex items-center gap-1 ${low ? "animate-pulse" : ""}`}
+        style={{ color: "#ffe14d", textShadow: "0 0 6px rgba(255,123,229,0.9)" }}
+      >
+        <StarBadgeIcon />
+        SUPER
+      </span>
+      <span className="h-2 w-12 overflow-hidden rounded-full border border-[#7a3cff]/70 bg-[#160f2e] sm:w-16">
+        <span
+          className="block h-full rounded-full transition-[width] duration-150 ease-linear"
+          style={{
+            width: `${pct * 100}%`,
+            background: "linear-gradient(90deg,#9bf6ff,#ffe14d,#ff7be5)",
+          }}
+        />
+      </span>
+    </span>
   );
 }
 
@@ -597,6 +714,12 @@ function Legend() {
       </span>
       <span className="flex items-center gap-1.5">
         <StarIcon /> BONUS
+      </span>
+      <span className="flex items-center gap-1.5">
+        <span style={{ color: "#ffe14d" }}>
+          <StarBadgeIcon />
+        </span>{" "}
+        SUPER
       </span>
       <span className="flex items-center gap-1.5">
         <SnailIcon /> STOMP

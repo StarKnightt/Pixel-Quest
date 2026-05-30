@@ -38,6 +38,8 @@ export interface LevelConfig {
   platforms: Platform[];
   coins: [number, number][]; // [col, row] (air cell, coin centered)
   gems: [number, number][];
+  powerups: [number, number][]; // candidate spots; a random subset spawns per run
+  powerupCount?: number; // how many candidates actually spawn (default 3)
   snails: { col: number; row: number }[]; // feet rest on top of tile (col,row)
   playerStart: { col: number; row: number };
   goal: { col: number; row: number };
@@ -186,6 +188,21 @@ export const LEVEL_1: LevelConfig = {
     [110, 4],
     [137, 4],
   ],
+  // super-star power-up candidates: a random few of these spawn each run so the
+  // pickups aren't in the same spot every time. All are safe, reachable air cells.
+  powerups: [
+    [12, 8],
+    [22, 8],
+    [47, 6],
+    [52, 5],
+    [64, 7],
+    [73, 7],
+    [88, 6],
+    [104, 6],
+    [115, 6],
+    [131, 6],
+  ],
+  powerupCount: 3,
   snails: [
     { col: 13, row: 10 },
     { col: 31, row: 10 }, // moved off the (now-moving) cloud at col 24

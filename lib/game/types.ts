@@ -12,6 +12,9 @@ export interface Vec2 {
 
 export type GameStatus = "ready" | "playing" | "won" | "lost";
 
+/** Why the run ended (only meaningful when status is "lost"). */
+export type LoseReason = "time" | "lives" | null;
+
 export interface InputState {
   left: boolean;
   right: boolean;
@@ -26,6 +29,8 @@ export interface HudSnapshot {
   time: number;
   lives: number;
   status: GameStatus;
+  loseReason: LoseReason;
+  power: number; // seconds of Super Star mode remaining (0 = inactive)
 }
 
 /** A processed image sprite (chroma-keyed + cropped + pre-scaled to size). */

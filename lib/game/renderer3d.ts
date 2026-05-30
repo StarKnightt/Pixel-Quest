@@ -59,6 +59,74 @@ function radialTexture(inner: string, outer: string): THREE.CanvasTexture {
   return t;
 }
 
+/** A chunky 5-point "super star" power-up sprite, drawn procedurally so we
+ *  don't need to extend the image-asset pipeline. Glowing gold body, white
+ *  core, dark outline + two sparkle eyes for that classic power-up charm. */
+function starTexture(): THREE.CanvasTexture {
+  const theme = {
+    glow: "rgba(255,231,120,0.55)",
+    outline: "#7a3cff",
+    body: ["#fff7c4", "#ffe14d", "#ff9b2f"] as const,
+    eye: "#5a2bb8",
+  };
+  const S = 128;
+  const c = document.createElement("canvas");
+  c.width = c.height = S;
+  const ctx = c.getContext("2d")!;
+  const cx = S / 2;
+  const cy = S / 2 + 4;
+  const outer = S * 0.42;
+  const inner = outer * 0.45;
+  const pts: [number, number][] = [];
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outer : inner;
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    pts.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+  }
+  const path = () => {
+    ctx.beginPath();
+    pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+  };
+  // soft outer glow
+  const glow = ctx.createRadialGradient(cx, cy, inner * 0.5, cx, cy, outer * 1.5);
+  glow.addColorStop(0, theme.glow);
+  glow.addColorStop(1, theme.glow.replace(/[\d.]+\)$/, "0)"));
+  ctx.fillStyle = glow;
+  ctx.fillRect(0, 0, S, S);
+  // dark outline
+  ctx.lineJoin = "round";
+  ctx.lineWidth = 9;
+  ctx.strokeStyle = theme.outline;
+  path();
+  ctx.stroke();
+  // body gradient
+  const body = ctx.createLinearGradient(cx, cy - outer, cx, cy + outer);
+  body.addColorStop(0, theme.body[0]);
+  body.addColorStop(0.5, theme.body[1]);
+  body.addColorStop(1, theme.body[2]);
+  ctx.fillStyle = body;
+  path();
+  ctx.fill();
+  // glossy highlight
+  ctx.fillStyle = "rgba(255,255,255,0.55)";
+  ctx.beginPath();
+  ctx.ellipse(cx - outer * 0.18, cy - outer * 0.28, outer * 0.22, outer * 0.34, -0.5, 0, Math.PI * 2);
+  ctx.fill();
+  // sparkle eyes
+  ctx.fillStyle = theme.eye;
+  for (const dx of [-1, 1]) {
+    ctx.beginPath();
+    ctx.ellipse(cx + dx * outer * 0.2, cy + outer * 0.06, outer * 0.06, outer * 0.11, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.magFilter = THREE.LinearFilter;
+  t.minFilter = THREE.LinearFilter;
+  return t;
+}
+
 interface EntityRect {
   x: number;
   y: number;
@@ -71,6 +139,9 @@ export class Renderer3D {
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
   private sun: THREE.DirectionalLight;
+  private ambient!: THREE.AmbientLight;
+  private hemi!: THREE.HemisphereLight;
+  private fog!: THREE.Fog;
 
   private quad = new THREE.PlaneGeometry(1, 1);
   private shadowMat: THREE.MeshBasicMaterial;
@@ -89,6 +160,9 @@ export class Renderer3D {
   private snailMeshes = new Map<object, { body: THREE.Mesh; shadow: THREE.Mesh }>();
   private coinMeshes = new Map<object, THREE.Mesh>();
   private gemMeshes = new Map<object, THREE.Mesh>();
+  private powerupMeshes = new Map<object, THREE.Mesh>();
+  private powerMat!: THREE.MeshBasicMaterial;
+  private heroAura!: THREE.Mesh;
   private cloudMeshes: { mesh: THREE.Mesh; h: number }[] = [];
   private flag: THREE.Mesh | null = null;
 
@@ -101,6 +175,12 @@ export class Renderer3D {
 
   private particles: THREE.Points;
   private particlePos: Float32Array;
+
+  // falling-snow field (shown only in snowy biomes), anchored to the camera
+  private snow!: THREE.Points;
+  private snowPos!: Float32Array;
+  private snowMat!: THREE.PointsMaterial;
+  private snowSeed: { fx: number; fy: number; speed: number; sway: number }[] = [];
 
   private level: Level;
   private cw = 0;
@@ -128,14 +208,16 @@ export class Renderer3D {
     bg.colorSpace = THREE.SRGBColorSpace;
     bg.needsUpdate = true;
     this.scene.background = bg;
-    this.scene.fog = new THREE.Fog(0x241a3a, 700, 1500);
+    this.fog = new THREE.Fog(0x241a3a, 700, 1500);
+    this.scene.fog = this.fog;
 
     this.camera = new THREE.PerspectiveCamera(38, 16 / 9, 1, 4000);
 
     // --- lighting ------------------------------------------------------
-    this.scene.add(new THREE.AmbientLight(0x9aa6d6, 1.05));
-    const hemi = new THREE.HemisphereLight(0xffd9a0, 0x3a2b55, 0.55);
-    this.scene.add(hemi);
+    this.ambient = new THREE.AmbientLight(0x9aa6d6, 1.05);
+    this.scene.add(this.ambient);
+    this.hemi = new THREE.HemisphereLight(0xffd9a0, 0x3a2b55, 0.55);
+    this.scene.add(this.hemi);
 
     this.sun = new THREE.DirectionalLight(0xfff0d0, 1.5);
     this.sun.castShadow = true;
@@ -205,6 +287,32 @@ export class Renderer3D {
       toneMapped: false,
     });
 
+    // super-star power-up: procedural glowing-star billboard
+    this.powerMat = new THREE.MeshBasicMaterial({
+      map: starTexture(),
+      transparent: true,
+      alphaTest: 0.02,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+
+    // additive glow that haloes the hero while Super mode is active
+    this.heroAura = new THREE.Mesh(
+      this.quad,
+      new THREE.MeshBasicMaterial({
+        map: radialTexture("rgba(255,231,120,0.9)", "rgba(155,246,255,0)"),
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      }),
+    );
+    this.heroAura.renderOrder = 4;
+    this.heroAura.visible = false;
+    this.scene.add(this.heroAura);
+
     this.hero = new THREE.Mesh(this.quad, this.heroMats.idle);
     this.hero.renderOrder = 5;
     this.scene.add(this.hero);
@@ -229,6 +337,35 @@ export class Renderer3D {
     this.particles = new THREE.Points(pgeo, pmat);
     this.particles.frustumCulled = false;
     this.scene.add(this.particles);
+
+    // --- falling snow (camera-anchored, faded in by biome) -------------
+    const SNOW = 150;
+    this.snowPos = new Float32Array(SNOW * 3);
+    for (let i = 0; i < SNOW; i++) {
+      this.snowSeed.push({
+        fx: Math.random(),
+        fy: Math.random(),
+        speed: 0.06 + Math.random() * 0.1,
+        sway: Math.random() * Math.PI * 2,
+      });
+    }
+    const sgeo = new THREE.BufferGeometry();
+    sgeo.setAttribute("position", new THREE.BufferAttribute(this.snowPos, 3));
+    this.snowMat = new THREE.PointsMaterial({
+      size: 7,
+      sizeAttenuation: true,
+      map: radialTexture("rgba(255,255,255,1)", "rgba(235,245,255,0)"),
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      depthTest: false,
+      toneMapped: false,
+    });
+    this.snow = new THREE.Points(sgeo, this.snowMat);
+    this.snow.frustumCulled = false;
+    this.snow.renderOrder = 20;
+    this.snow.visible = false;
+    this.scene.add(this.snow);
   }
 
   // ---------------------------------------------------------------- build
@@ -404,7 +541,39 @@ export class Renderer3D {
     this.sun.target.position.set(tx, ty, -DEPTH / 2);
     this.sun.target.updateMatrixWorld();
 
+    // --- biome atmosphere: lerp fog + light colours by camera position --
+    const sc = game.getScenery();
+    this.fog.color.setRGB(sc.fog[0], sc.fog[1], sc.fog[2]);
+    this.sun.color.setRGB(sc.sun[0], sc.sun[1], sc.sun[2]);
+    this.ambient.color.setRGB(sc.ambient[0], sc.ambient[1], sc.ambient[2]);
+    this.hemi.color.setRGB(sc.hemiSky[0], sc.hemiSky[1], sc.hemiSky[2]);
+    this.hemi.groundColor.setRGB(
+      sc.hemiGround[0],
+      sc.hemiGround[1],
+      sc.hemiGround[2],
+    );
+
     const t = performance.now() / 1000;
+
+    // --- falling snow, faded in by the snow-biome factor ---------------
+    this.snow.visible = sc.snow > 0.02;
+    if (this.snow.visible) {
+      this.snowMat.opacity = sc.snow * 0.9;
+      const W = VIEW_W + 180;
+      const H = VIEW_H + 180;
+      const left = tx - W / 2;
+      const top = ty + H / 2;
+      for (let i = 0; i < this.snowSeed.length; i++) {
+        const sd = this.snowSeed[i];
+        const fx = (sd.fx + Math.sin(t * 0.5 + sd.sway) * 0.04 + 1) % 1;
+        const fy = (sd.fy + t * sd.speed) % 1; // 0 at top -> 1 at bottom
+        this.snowPos[i * 3] = left + fx * W;
+        this.snowPos[i * 3 + 1] = top - fy * H;
+        this.snowPos[i * 3 + 2] = PICKUP_Z + 6;
+      }
+      (this.snow.geometry.attributes.position as THREE.BufferAttribute).needsUpdate =
+        true;
+    }
 
     // --- hero (real per-frame animation: legs/arms actually move) ------
     const p = game.player;
@@ -438,6 +607,18 @@ export class Renderer3D {
       }
 
       if (this.hero.material !== mat) this.hero.material = mat;
+
+      // Super Star mode: shimmer the hero + show a pulsing halo. In the final
+      // ~2.5s the whole hero blinks to warn the power is about to run out.
+      if (p.powered && !p.dying) {
+        const pulse = 0.5 + 0.5 * Math.sin(t * 18);
+        mat.color.setRGB(1, 0.68 + 0.32 * pulse, 0.38 + 0.62 * pulse);
+        const ending = p.powerT < 2.5 && Math.floor(p.powerT * 10) % 2 === 0;
+        if (ending) this.hero.visible = false;
+      } else {
+        mat.color.setRGB(1, 1, 1);
+      }
+
       const hW = spr.w * this.heroPPU;
       const hH = spr.h * this.heroPPU;
       const feet = p.y + p.h;
@@ -452,6 +633,24 @@ export class Renderer3D {
         flip,
         flip && !p.dying ? -rot : rot,
       );
+
+      // halo aura behind the hero while powered
+      this.heroAura.visible = p.powered && !p.dying;
+      if (this.heroAura.visible) {
+        const aura = 58 + Math.sin(t * 10) * 8;
+        (this.heroAura.material as THREE.MeshBasicMaterial).opacity =
+          0.55 + 0.25 * (0.5 + 0.5 * Math.sin(t * 12));
+        this.billboard(
+          this.heroAura,
+          p.x + p.w / 2,
+          -(p.y + p.h / 2),
+          CHAR_Z - 1,
+          aura,
+          aura,
+          false,
+          t * 1.4,
+        );
+      }
     }
     if (!p.dying) this.layShadow(this.heroShadow, p.rect);
     else this.heroShadow.visible = false;
@@ -519,6 +718,23 @@ export class Renderer3D {
         gH * pulse,
         false,
         t * 1.6 + g.x,
+      );
+    }
+
+    // --- super-star power-ups -----------------------------------------
+    this.prunePickups(this.powerupMeshes, game.powerups);
+    for (const pu of game.powerups) {
+      const mesh = this.pickupMesh(this.powerupMeshes, pu, this.powerMat);
+      const sz = 30 + Math.sin(t * 5 + pu.x * 0.05) * 2.5;
+      this.billboard(
+        mesh,
+        pu.x + pu.w / 2,
+        -(pu.y + pu.h / 2),
+        PICKUP_Z,
+        sz,
+        sz,
+        false,
+        Math.sin(t * 2 + pu.x) * 0.25,
       );
     }
 

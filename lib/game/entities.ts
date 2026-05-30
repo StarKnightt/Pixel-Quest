@@ -17,6 +17,8 @@ import {
   JUMP_BUFFER,
   HURT_KNOCKBACK,
   INVULN_TIME,
+  SUPER_JUMP_VELOCITY,
+  SUPER_RUN_SPEED,
 } from "./constants";
 import type { InputState, Rect } from "./types";
 import type { Level, PlatformMotion } from "./level";
@@ -127,6 +129,8 @@ export class Player {
   private buffer = 0;
   invuln = 0;
   dead = false;
+  // Super Star power-up timer (seconds remaining of "super" mode).
+  powerT = 0;
 
   // death sequence (pit fall): a little hop then a spinning tumble
   dying = false;
@@ -145,12 +149,23 @@ export class Player {
     return { x: this.x, y: this.y, w: this.w, h: this.h };
   }
 
+  /** Is the hero currently in Super Star mode (higher jump, invincible)? */
+  get powered(): boolean {
+    return this.powerT > 0;
+  }
+
+  /** Grant (or refresh) Super Star mode for `duration` seconds. */
+  empower(duration: number) {
+    this.powerT = Math.max(this.powerT, duration);
+  }
+
   respawn(col: number, row: number) {
     this.x = col * TILE + (TILE - this.w) / 2;
     this.y = row * TILE + (TILE - this.h);
     this.vx = 0;
     this.vy = 0;
     this.invuln = INVULN_TIME;
+    this.powerT = 0;
     this.dead = false;
     this.dying = false;
     this.deathT = 0;
@@ -195,7 +210,10 @@ export class Player {
     }
 
     if (this.invuln > 0) this.invuln -= dt;
+    if (this.powerT > 0) this.powerT = Math.max(0, this.powerT - dt);
 
+    const runSpeed = this.powered ? SUPER_RUN_SPEED : PLAYER_RUN_SPEED;
+    const jumpVel = this.powered ? SUPER_JUMP_VELOCITY : JUMP_VELOCITY;
     const accel = this.onGround ? PLAYER_ACCEL : PLAYER_AIR_ACCEL;
     if (input.left && !input.right) {
       this.vx -= accel * dt;
@@ -209,22 +227,22 @@ export class Player {
       if (this.vx > 0) this.vx = Math.max(0, this.vx - f);
       else if (this.vx < 0) this.vx = Math.min(0, this.vx + f);
     }
-    this.vx = Math.max(-PLAYER_RUN_SPEED, Math.min(PLAYER_RUN_SPEED, this.vx));
+    this.vx = Math.max(-runSpeed, Math.min(runSpeed, this.vx));
 
     // jump w/ coyote-time + input buffering
     this.coyote = this.onGround ? COYOTE_TIME : Math.max(0, this.coyote - dt);
     if (input.jumpPressed) this.buffer = JUMP_BUFFER;
     else this.buffer = Math.max(0, this.buffer - dt);
     if (this.buffer > 0 && this.coyote > 0) {
-      this.vy = JUMP_VELOCITY;
+      this.vy = jumpVel;
       this.onGround = false;
       this.coyote = 0;
       this.buffer = 0;
       this.justJumped = true;
     }
     // variable jump height: release early = cut upward velocity
-    if (!input.jump && this.vy < JUMP_VELOCITY * JUMP_CUT)
-      this.vy = JUMP_VELOCITY * JUMP_CUT;
+    if (!input.jump && this.vy < jumpVel * JUMP_CUT)
+      this.vy = jumpVel * JUMP_CUT;
 
     // gravity
     this.vy = Math.min(MAX_FALL, this.vy + GRAVITY * dt);
@@ -317,6 +335,8 @@ abstract class Pickup {
   animTime = 0;
   collected = false;
   baseY: number;
+  // random phase so a cluster of pickups doesn't bob/pulse in lockstep
+  phase = Math.random() * Math.PI * 2;
 
   constructor(col: number, row: number, size: number) {
     this.w = size;
@@ -332,8 +352,8 @@ abstract class Pickup {
 
   update(dt: number) {
     this.animTime += dt;
-    // gentle floating bob
-    this.y = this.baseY + Math.sin(this.animTime * 3) * 2;
+    // gentle floating bob (phase-offset per instance)
+    this.y = this.baseY + Math.sin(this.animTime * 3 + this.phase) * 2;
   }
 }
 
@@ -401,3 +421,11 @@ export class Gem extends Pickup {
     super(col, row, 20);
   }
 }
+
+/** Super Star power-up: bobs + spins, grants the hero timed "super" mode. */
+export class PowerUp extends Pickup {
+  constructor(col: number, row: number) {
+    super(col, row, 24);
+  }
+}
+
