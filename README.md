@@ -141,5 +141,3 @@ based on Pixel Quest, a shout-out and a link back to
 Made with 💜 and way too much pixel art.
 
 </div>
-
-☕ like it? [buy me a coffee](https://buymeacoffee.com/prasenx) or [sponsor on github](https://github.com/sponsors/StarKnightt)
